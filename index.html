@@ -553,7 +553,7 @@ body,.task-card,.modal-box,.config-section,.status-popup,.cl-modal,#dp-pop,.time
     <button class="sidebar-close-btn" onclick="toggleConfigSidebar()"><i class="fa-solid fa-xmark"></i></button>
   </div>
   <div class="sidebar-version-row">
-    <button class="version-pill" id="version-pill" onclick="changelogModal.open()"><i class="fa-solid fa-clock-rotate-left"></i> v2026.08.02 — What's New</button>
+    <button class="version-pill" id="version-pill" onclick="changelogModal.open()"><i class="fa-solid fa-clock-rotate-left"></i> v2026.08.03 — What's New</button>
   </div>
   <div class="config-sidebar-body">
 
@@ -3071,6 +3071,11 @@ async function doExport(format){
 // All prior entries were removed; future releases increment from this point
 // (v2026.08.01, v2026.08.02, ...), newest first.
 const changelogModal = createChangelogModal([
+  {version:'v2026.08.03', date:'Aug 2026', items:[
+    'The app has moved to a new shared link: https://SIT-CarrierEngagement.github.io/assignment-log/ — please update your bookmark to this new address',
+    'All existing Tasks are unaffected by the move — the database stayed the same, only the hosting link changed',
+    'Fixed the "Push to GitHub & Publish" button failing with a 404 when publishing to a brand-new, empty GitHub repository for the first time'
+  ]},
   {version:'v2026.08.02', date:'Aug 2026', items:[
     'Fixed a data-loss bug where adding a task and refreshing right away could lose it, or reconnecting with unsynced local edits could overwrite newer changes made on other devices — data from all devices is now merged instead of one side blindly overwriting the other',
     'A tab left open across a new deploy now automatically stops syncing (and shows the "Update available" notice) instead of silently writing with outdated logic — refresh to resume syncing',
@@ -3106,7 +3111,7 @@ const SB_TABLE='task_manager_state';
 // in-app "a newer version exists" notice, using a second row (id=SB_META_ID)
 // in the same table as a tiny shared bulletin board — bump APP_HTML_VERSION
 // here to match the latest changelog entry each time you publish an update.
-const APP_HTML_VERSION='v2026.08.02';
+const APP_HTML_VERSION='v2026.08.03';
 const SB_META_ID='app_meta';
 // The shared link everyone should open this app from (Supabase Storage) —
 // baked in so Publish doesn't require re-pasting it every time.
