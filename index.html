@@ -553,7 +553,7 @@ body,.task-card,.modal-box,.config-section,.status-popup,.cl-modal,#dp-pop,.time
     <button class="sidebar-close-btn" onclick="toggleConfigSidebar()"><i class="fa-solid fa-xmark"></i></button>
   </div>
   <div class="sidebar-version-row">
-    <button class="version-pill" id="version-pill" onclick="changelogModal.open()"><i class="fa-solid fa-clock-rotate-left"></i> v2026.08.03 — What's New</button>
+    <button class="version-pill" id="version-pill" onclick="changelogModal.open()"><i class="fa-solid fa-clock-rotate-left"></i> v2026.08.31 — What's New</button>
   </div>
   <div class="config-sidebar-body">
 
@@ -1583,6 +1583,51 @@ function migrateHistoryField(){
   return changed;
 }
 migrateHistoryField();
+// Editing a task through the modal used to only flip `done` on when Status
+// was exactly 'completed', missing the monthly-task equivalent
+// 'monthly-complete' — leaving some existing tasks with a "done" status pill
+// but an unchecked Done box / no strikethrough. Reconcile any of those once,
+// both at boot and whenever remote data is pulled in.
+function migrateDoneStatusConsistency(){
+  let changed=false;
+  tasks.forEach(t=>{
+    if((t.status==='completed'||t.status==='monthly-complete') && !t.done){
+      t.done=true; changed=true;
+    }
+  });
+  if(changed) localStorage.setItem('tm_tasks_v6', JSON.stringify(tasks));
+  return changed;
+}
+migrateDoneStatusConsistency();
+// Monthly tasks marked "Monthly Complete" don't carry over as done into the
+// next month — once the calendar month rolls over, every such task is
+// reopened as "Pending for this Month" so it shows up again as work to do.
+// Guarded by a stored 'YYYY-MM' so this only fires once per month rollover
+// (and never on the very first run, which just records the current month
+// instead of wiping out completions made earlier that same month).
+function resetMonthlyTasksForNewMonth(){
+  const curMonth=new Date().toISOString().slice(0,7);
+  const lastMonth=localStorage.getItem('tm_monthly_reset_month');
+  if(lastMonth===null){
+    localStorage.setItem('tm_monthly_reset_month',curMonth);
+    return false;
+  }
+  if(lastMonth===curMonth) return false;
+  let changed=false;
+  tasks.forEach(t=>{
+    if(t.isMonthly && t.status==='monthly-complete'){
+      const prevStatus=t.status;
+      t.status='pending-month';
+      t.done=false;
+      addHistory(t,'status',[{field:'Status',from:fmtHistoryVal('status',prevStatus),to:fmtHistoryVal('status','pending-month')}]);
+      changed=true;
+    }
+  });
+  localStorage.setItem('tm_monthly_reset_month',curMonth);
+  if(changed) localStorage.setItem('tm_tasks_v6', JSON.stringify(tasks));
+  return changed;
+}
+resetMonthlyTasksForNewMonth();
 let selP='2', editId=null, editingDraftId=null, wdBuf=[], todoBuf=[], quill=null, statusTargetId=null, modalInitialSnapshot=null;
 let autoGcal = localStorage.getItem('tm_auto_gcal') === 'true'; // default OFF
 
@@ -2129,7 +2174,11 @@ function toggleComplete(id){
   if(!t)return;
   const prevStatus=t.status;
   t.done=!t.done;
-  const newStatus=t.done?'completed':'inprogress';
+  // Monthly tasks use their own status pair — reusing 'completed'/'inprogress'
+  // here would desync the Done checkbox from the status pill shown on monthly cards.
+  const newStatus = t.isMonthly
+    ? (t.done?'monthly-complete':'pending-month')
+    : (t.done?'completed':'inprogress');
   t.status=newStatus;
   if(prevStatus!==newStatus) addHistory(t,'status',[{field:'Status',from:fmtHistoryVal('status',prevStatus),to:fmtHistoryVal('status',newStatus)}]);
   save();render();
@@ -2394,7 +2443,10 @@ function readModalPayload(nameFallback){
     workDays:[...wdBuf],
     todos:todoBuf.map(td=>({...td})),
     detail:quill?quill.root.innerHTML:'',
-    done:document.getElementById('f-status').value==='completed'
+    // Monthly tasks are marked done via 'monthly-complete', not 'completed' —
+    // missing that case here left the Done checkbox/strikethrough out of sync
+    // with the Status pill whenever a monthly task was edited through this modal.
+    done:['completed','monthly-complete'].includes(document.getElementById('f-status').value)
   };
 }
 function saveAutoGcalPref(){
@@ -2559,7 +2611,7 @@ function todoBlock(t){
 }
 function buildCard(t){
   const s=getStatus(t.status||'pending');
-  const done=(t.status==='completed'||t.done);
+  const done=(t.status==='completed'||t.status==='monthly-complete'||t.done);
   const cancelled=(t.status==='cancel');
   const div=document.createElement('div');
   div.className=`task-card${done?' tc-done':''}${cancelled?' tc-cancel':''}`;
@@ -3071,6 +3123,11 @@ async function doExport(format){
 // All prior entries were removed; future releases increment from this point
 // (v2026.08.01, v2026.08.02, ...), newest first.
 const changelogModal = createChangelogModal([
+  {version:'v2026.08.31', date:'Aug 2026', items:[
+    'Fixed Monthly tasks sometimes showing the "Monthly Complete" status pill while still appearing as undone (unchecked Done box, no strikethrough) — editing a task through the modal now marks it done for both "Completed" and "Monthly Complete", matching the status pill',
+    'Monthly tasks marked "Monthly Complete" now automatically reopen as "Pending for this Month" (undone) as soon as the calendar rolls into a new month',
+    'The Done checkbox on a Monthly task now correctly toggles between "Pending for this Month" and "Monthly Complete" instead of the regular task statuses'
+  ]},
   {version:'v2026.08.03', date:'Aug 2026', items:[
     'The app has moved to a new shared link: https://SIT-CarrierEngagement.github.io/assignment-log/ — please update your bookmark to this new address',
     'All existing Tasks are unaffected by the move — the database stayed the same, only the hosting link changed',
@@ -3111,7 +3168,7 @@ const SB_TABLE='task_manager_state';
 // in-app "a newer version exists" notice, using a second row (id=SB_META_ID)
 // in the same table as a tiny shared bulletin board — bump APP_HTML_VERSION
 // here to match the latest changelog entry each time you publish an update.
-const APP_HTML_VERSION='v2026.08.03';
+const APP_HTML_VERSION='v2026.08.31';
 const SB_META_ID='app_meta';
 // The shared link everyone should open this app from (Supabase Storage) —
 // baked in so Publish doesn't require re-pasting it every time.
@@ -3340,7 +3397,7 @@ function applyState(data){
   // A remote copy pushed before a data migration existed would otherwise
   // silently reintroduce the old data every time it's pulled back down —
   // push the corrected copy straight back up so it sticks for every device.
-  const migrated = migratePriorityAndStatusDefaults() | migrateMonthlyTaskField() | migrateHistoryField() | purgeExpiredTrash();
+  const migrated = migratePriorityAndStatusDefaults() | migrateMonthlyTaskField() | migrateHistoryField() | migrateDoneStatusConsistency() | purgeExpiredTrash() | resetMonthlyTasksForNewMonth();
   if(migrated) pushStateToSupabase();
   refreshSelects(); renderConfig(); render(); updateDraftBadge(); updateTrashBadge();
 }
@@ -3474,6 +3531,7 @@ updateDraftBadge();
 purgeExpiredTrash(); // saves to localStorage itself if it found anything expired
 updateTrashBadge();
 setInterval(()=>{ if(purgeExpiredTrash()) updateTrashBadge(); }, 60*60*1000); // safety net for tabs left open past the retention window
+setInterval(()=>{ if(resetMonthlyTasksForNewMonth()){ save(); render(); } }, 60*60*1000); // safety net for a tab left open across the month rollover
 updateVersionUI(); // shows the current version even before/without a database connection
 renderAdminGateUI(); // restores the admin unlock state for this browser tab, if any
 loadSupabaseConfig();
