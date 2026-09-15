@@ -243,6 +243,20 @@ html,body{height:100%;font-family:'Inter',sans-serif;background:var(--theme-bg,#
 .sel-dates{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
 .sdpill{background:var(--theme-btn-light,#FFF3E0);color:var(--theme-on-btnlight,var(--theme-dark,#C05A10));border:1px solid var(--theme-border,#FFB877);border-radius:10px;padding:2px 7px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px;}
 .sdpill button{background:none;border:none;cursor:pointer;color:var(--theme-on-btnlight,var(--theme-dark,#C05A10));font-size:12px;line-height:1;padding:0;}
+/* Assignee multi-select dropdown */
+.msel{position:relative;}
+.msel-trigger{display:flex;align-items:center;justify-content:space-between;gap:6px;cursor:pointer;text-align:left;font-family:'Inter',sans-serif;}
+.msel-trigger.field-invalid{border-color:#DC2626;box-shadow:0 0 0 2px rgba(220,38,38,.12);}
+.msel-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:60;background:var(--surface-card,#fff);border:1.5px solid var(--border2,#E5E5E5);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.12);max-height:220px;overflow-y:auto;padding:4px;}
+.msel-panel.open{display:block;}
+.msel-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text,#222);}
+.msel-item:hover{background:var(--surface-hover,#F5F5F5);}
+.msel-item input{width:14px;height:14px;accent-color:var(--theme-dark,#E07020);cursor:pointer;flex-shrink:0;}
+/* Per-work-day completion checkbox on the wd-pill */
+.wd-pill{display:inline-flex;align-items:center;gap:4px;}
+.wd-pill input[type="checkbox"]{width:11px;height:11px;accent-color:#E07020;cursor:pointer;margin:0;flex-shrink:0;}
+.wd-pill.wd-daydone{background:var(--surface-hover,#F5F5F5);color:var(--text-faint,#BBB);border-color:var(--border-input,#DDD);}
+.wd-pill.wd-daydone .wd-pill-label{text-decoration:line-through;}
 .modal-footer{display:flex;gap:8px;margin-top:14px;}
 .btn-cancel{flex:1;padding:10px;border:1.5px solid var(--border-soft,#EEE);border-radius:9px;background:var(--surface-card,#fff);color:var(--text-tertiary,#888);font-family:'Inter',sans-serif;font-size:13px;font-weight:600;cursor:pointer;}
 .btn-cancel:hover{background:var(--surface-hover,#F5F5F5);}
@@ -553,7 +567,7 @@ body,.task-card,.modal-box,.config-section,.status-popup,.cl-modal,#dp-pop,.time
     <button class="sidebar-close-btn" onclick="toggleConfigSidebar()"><i class="fa-solid fa-xmark"></i></button>
   </div>
   <div class="sidebar-version-row">
-    <button class="version-pill" id="version-pill" onclick="changelogModal.open()"><i class="fa-solid fa-clock-rotate-left"></i> v2026.08.31 — What's New</button>
+    <button class="version-pill" id="version-pill" onclick="changelogModal.open()"><i class="fa-solid fa-clock-rotate-left"></i> v2026.09.00 — What's New</button>
   </div>
   <div class="config-sidebar-body">
 
@@ -864,7 +878,13 @@ body,.task-card,.modal-box,.config-section,.status-popup,.cl-modal,#dp-pop,.time
       </div>
       <div class="form-group">
         <label class="form-label">Assignee *</label>
-        <select class="form-control" id="f-to" onchange="this.classList.remove('field-invalid')"><option value="">-- Select --</option></select>
+        <div class="msel" id="f-to-msel">
+          <button type="button" class="form-control msel-trigger" id="f-to-trigger" onclick="toggleAssigneeDropdown(event)">
+            <span id="f-to-trigger-label">-- Select --</span>
+            <i class="fa-solid fa-chevron-down" style="font-size:10px;opacity:.6;"></i>
+          </button>
+          <div class="msel-panel" id="f-to-panel"></div>
+        </div>
       </div>
     </div>
     <div class="form-row">
@@ -1583,6 +1603,26 @@ function migrateHistoryField(){
   return changed;
 }
 migrateHistoryField();
+// Assignee went from a single string (assignedTo) to a list (assignees).
+// Backfill the array from the old field so existing tasks/drafts keep their
+// assignee and start matching the "any of its assignees" filter logic.
+function migrateAssigneesField(){
+  let changed=false;
+  [tasks, drafts].forEach(list=>{
+    list.forEach(t=>{
+      if(!Array.isArray(t.assignees)){
+        t.assignees = t.assignedTo ? [t.assignedTo] : [];
+        changed=true;
+      }
+    });
+  });
+  if(changed){
+    localStorage.setItem('tm_tasks_v6', JSON.stringify(tasks));
+    localStorage.setItem('tm_drafts', JSON.stringify(drafts));
+  }
+  return changed;
+}
+migrateAssigneesField();
 // Editing a task through the modal used to only flip `done` on when Status
 // was exactly 'completed', missing the monthly-task equivalent
 // 'monthly-complete' — leaving some existing tasks with a "done" status pill
@@ -1670,7 +1710,7 @@ function buildEventUrl(t) {
     'Priority: ' + PRI_LABEL[t.priority],
     'Status: '   + getStatus(t.status).label,
     'From: '     + (t.assignedFrom||'-'),
-    'To: '       + (t.assignedTo||'-'),
+    'To: '       + (taskAssignees(t).join(', ')||'-'),
     'Deadline: ' + (t.deadline||'-'),
     t.detail ? 'Note: '+t.detail.replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim() : ''
   ].filter(Boolean).join('\n');
@@ -1939,15 +1979,50 @@ function refreshSelects(){
   const mc=document.getElementById('f-country');
   const mp=document.getElementById('f-project');
   const mfrom=document.getElementById('f-from');
-  const mto=document.getElementById('f-to');
   if(mc){const v=mc.value;mc.innerHTML='<option value="">-- Select --</option>';countries.forEach(c=>mc.innerHTML+=`<option value="${c}">${c}</option>`);mc.value=v;}
   if(mp){const v=mp.value;mp.innerHTML='<option value="">-- Select --</option>';projects.forEach(p=>mp.innerHTML+=`<option value="${p}">${p}</option>`);mp.value=v;}
   if(mfrom){const v=mfrom.value;mfrom.innerHTML='<option value="">-- Select --</option>';members.forEach(m=>mfrom.innerHTML+=`<option value="${m}">${m}</option>`);mfrom.value=v;}
-  if(mto){const v=mto.value;mto.innerHTML='<option value="">-- Select --</option>';members.forEach(m=>mto.innerHTML+=`<option value="${m}">${m}</option>`);mto.value=v;}
+  renderAssigneeDropdown();
   updateModalStatusOptions();
   renderAssignorQuickFilter();
   renderAssigneeQuickFilter();
 }
+
+// ══════════ ASSIGNEE MULTI-SELECT (modal) ══════════
+// Replaces the old single-select "f-to" dropdown: assigneeBuf holds the checked
+// member names for the task currently open in the modal, driven entirely by
+// checkboxes in a dropdown panel rather than one <option> per member.
+let assigneeBuf=[];
+function renderAssigneeDropdown(){
+  const panel=document.getElementById('f-to-panel');
+  if(!panel)return;
+  panel.innerHTML = members.map(m=>`
+    <label class="msel-item">
+      <input type="checkbox" value="${m.replace(/"/g,'&quot;')}" ${assigneeBuf.includes(m)?'checked':''} onchange="toggleAssigneeBuf('${m.replace(/'/g,"\\'")}',this.checked)">
+      <span>${m}</span>
+    </label>`).join('');
+  updateAssigneeTriggerLabel();
+}
+function toggleAssigneeBuf(m,checked){
+  if(checked){ if(!assigneeBuf.includes(m)) assigneeBuf.push(m); }
+  else { assigneeBuf=assigneeBuf.filter(x=>x!==m); }
+  document.getElementById('f-to-trigger').classList.remove('field-invalid');
+  updateAssigneeTriggerLabel();
+}
+function updateAssigneeTriggerLabel(){
+  const label=document.getElementById('f-to-trigger-label');
+  if(!label)return;
+  label.textContent = assigneeBuf.length ? assigneeBuf.join(', ') : '-- Select --';
+}
+function toggleAssigneeDropdown(e){
+  e.stopPropagation();
+  document.getElementById('f-to-panel').classList.toggle('open');
+}
+// Close the dropdown on any click outside it, same pattern as other popups in the app.
+document.addEventListener('click',(e)=>{
+  const msel=document.getElementById('f-to-msel');
+  if(msel && !msel.contains(e.target)) document.getElementById('f-to-panel')?.classList.remove('open');
+});
 
 // Status dropdown in the Add/Edit modal only offers statuses that apply to
 // the current priority (Normal Task vs Monthly Task groups) — Monthly is
@@ -2028,9 +2103,16 @@ function clearFilter(){
   applyFilter();
 }
 function applyFilter(){renderAssignorQuickFilter();renderAssigneeQuickFilter();renderLists();}
+// Tasks may carry multiple assignees (t.assignees, an array) — taskAssignees()
+// reads that, falling back to the legacy single t.assignedTo string for tasks
+// saved before multi-assignee existed, so old data keeps working unmigrated.
+function taskAssignees(t){
+  if(Array.isArray(t.assignees)) return t.assignees;
+  return t.assignedTo ? [t.assignedTo] : [];
+}
 function taskMatchesQuery(t,q){
   const hay=[
-    t.name, t.project, t.country, t.assignedFrom, t.assignedTo,
+    t.name, t.project, t.country, t.assignedFrom, ...taskAssignees(t),
     getStatus(t.status).label, getPriority(t.priority).label,
     t.deadline, (t.workDays||[]).join(' '),
     (t.detail||'').replace(/<[^>]*>/g,' ')
@@ -2054,7 +2136,9 @@ function getFiltered(){
     if(fwd&& !(t.workDays&&t.workDays.includes(fwd)))return false;
     if(fdl&& t.deadline!==fdl)return false;
     if(curAssignorFilter&&t.assignedFrom!==curAssignorFilter)return false;
-    if(curAssigneeFilter&&t.assignedTo!==curAssigneeFilter)return false;
+    // A task matches the Assignee quick filter if ANY of its assignees match —
+    // multiple assignees are never combined into one value for filtering.
+    if(curAssigneeFilter&&!taskAssignees(t).includes(curAssigneeFilter))return false;
     return true;
   });
 }
@@ -2080,7 +2164,7 @@ function closeStatusPopup(e){document.getElementById('status-popup-overlay').cla
 // edits, and — since it's just a normal field on the task object — survives
 // a trip through the Trash Bin (deleteTask/restoreTrashItem) untouched.
 const HISTORY_FIELD_LABELS = {
-  name:'Title', priority:'Priority', status:'Status', assignedFrom:'Assignor', assignedTo:'Assignee',
+  name:'Title', priority:'Priority', status:'Status', assignedFrom:'Assignor', assignees:'Assignee',
   country:'Country', project:'Data', deadline:'Deadline', startTime:'Start Time', endTime:'Finish Time',
   workDays:'Scheduled Work Days', detail:'Detail', todos:'To Do List', isMonthly:'Monthly Task',
 };
@@ -2089,6 +2173,7 @@ const HISTORY_ACTION_META = {
   edited:  {icon:'fa-pen',             label:'Task edited'},
   status:  {icon:'fa-flag',            label:'Status changed'},
   todo:    {icon:'fa-list-check',      label:'Checklist updated'},
+  workday: {icon:'fa-calendar-check',  label:'Work day updated'},
   trashed: {icon:'fa-trash-can',       label:'Moved to Trash'},
   restored:{icon:'fa-rotate-left',     label:'Restored from Trash'},
 };
@@ -2097,6 +2182,7 @@ function fmtHistoryVal(field,val){
   if(field==='status')   return val ? getStatus(val).label : '(none)';
   if(field==='deadline') return val ? fmtD(val) : 'No deadline';
   if(field==='workDays') return Array.isArray(val)&&val.length ? val.map(fmtDS).join(', ') : '(none)';
+  if(field==='assignees')return Array.isArray(val)&&val.length ? val.join(', ') : '(none)';
   if(field==='detail')   return val ? 'Updated' : '(empty)'; // avoid dumping raw rich-text HTML into the log
   if(field==='todos')    return Array.isArray(val) ? `${val.length} item(s)` : '(none)';
   if(field==='isMonthly')return val ? 'Yes' : 'No';
@@ -2115,8 +2201,8 @@ function logTaskEdit(oldTask, newTask){
   const changes=[];
   Object.keys(HISTORY_FIELD_LABELS).forEach(f=>{
     const a=oldTask[f], b=newTask[f];
-    const an = (f==='workDays'||f==='todos') ? JSON.stringify(a||[]) : (a??'');
-    const bn = (f==='workDays'||f==='todos') ? JSON.stringify(b||[]) : (b??'');
+    const an = (f==='workDays'||f==='todos'||f==='assignees') ? JSON.stringify(a||[]) : (a??'');
+    const bn = (f==='workDays'||f==='todos'||f==='assignees') ? JSON.stringify(b||[]) : (b??'');
     if(an!==bn) changes.push({field:HISTORY_FIELD_LABELS[f], from:fmtHistoryVal(f,a), to:fmtHistoryVal(f,b)});
   });
   if(changes.length) addHistory(newTask,'edited',changes);
@@ -2165,6 +2251,22 @@ function toggleCardTodo(taskId,idx){
   if(!t||!t.todos||!t.todos[idx])return;
   t.todos[idx].done=!t.todos[idx].done;
   addHistory(t,'todo',[{field:'To Do Item', from:'', to:`${t.todos[idx].done?'Checked':'Unchecked'}: "${t.todos[idx].text}"`}]);
+  save();render();
+}
+
+// ══════════ WORK DAY COMPLETION (independent of task-level Done) ══════════
+// Checking a Work Day only marks that single day complete — it never sets
+// t.done and never moves the task to the Done tab. Today's tab still hides
+// the task once TODAY's specific work day is checked, then shows it again
+// automatically on the next scheduled day, because renderLists() filters
+// "today" tasks by an undone work day, not by the task-level done flag.
+function toggleWorkDayDone(taskId,d){
+  const t=tasks.find(x=>x.id===taskId);
+  if(!t)return;
+  if(!Array.isArray(t.workDayDone)) t.workDayDone=[];
+  const wasDone=t.workDayDone.includes(d);
+  t.workDayDone = wasDone ? t.workDayDone.filter(x=>x!==d) : [...t.workDayDone, d];
+  addHistory(t,'workday',[{field:'Work Day', from:'', to:`${wasDone?'Reopened':'Completed'}: ${fmtDS(d)}`}]);
   save();render();
 }
 
@@ -2336,12 +2438,13 @@ function onMonthlyToggle(){
 // draft, or null for a blank/new form). Shared by openModal and openModalFromDraft.
 function populateModalFields(t){
   document.getElementById('f-name').classList.remove('field-invalid');
-  document.getElementById('f-to').classList.remove('field-invalid');
+  document.getElementById('f-to-trigger').classList.remove('field-invalid');
   document.getElementById('f-name').value=t?t.name||'':'';
   document.getElementById('f-country').value=t?t.country||'':'';
   document.getElementById('f-project').value=t?t.project||'':'';
   document.getElementById('f-from').value=t?t.assignedFrom||'':'';
-  document.getElementById('f-to').value=t?t.assignedTo||'':'';
+  assigneeBuf=t?[...taskAssignees(t)]:[];
+  renderAssigneeDropdown();
   selP=t?(t.priority||(t.isMonthly?'4':'2')):'2';
   if(selP==='4'){
     document.getElementById('f-deadline-nodl').disabled=true;
@@ -2432,7 +2535,11 @@ function readModalPayload(nameFallback){
   return {
     name,priority:selP,
     assignedFrom:document.getElementById('f-from').value.trim(),
-    assignedTo:document.getElementById('f-to').value.trim(),
+    assignees:[...assigneeBuf],
+    // Keep assignedTo populated too (first assignee) so anything that hasn't
+    // been updated to read the new array — an older cached tab mid-rollout,
+    // a future feature — still sees a sensible single value instead of blank.
+    assignedTo:assigneeBuf[0]||'',
     country:document.getElementById('f-country').value,
     project:document.getElementById('f-project').value,
     status:document.getElementById('f-status').value,
@@ -2456,17 +2563,16 @@ function saveAutoGcalPref(){
 }
 function saveTask(){
   const nameEl=document.getElementById('f-name');
-  const toEl=document.getElementById('f-to');
+  const toEl=document.getElementById('f-to-trigger');
   const name=nameEl.value.trim();
-  const assignee=toEl.value.trim();
   nameEl.classList.remove('field-invalid');
   toEl.classList.remove('field-invalid');
   const missing=[];
   if(!name){ missing.push('Task Name'); nameEl.classList.add('field-invalid'); }
-  if(!assignee){ missing.push('Assignee'); toEl.classList.add('field-invalid'); }
+  if(!assigneeBuf.length){ missing.push('Assignee'); toEl.classList.add('field-invalid'); }
   if(missing.length){
     alert('Please fill in the required field'+(missing.length>1?'s':'')+' before saving: '+missing.join(', ')+'.');
-    (missing[0]==='Task Name'?nameEl:toEl).focus();
+    if(missing[0]==='Task Name') nameEl.focus(); else toEl.click();
     return;
   }
   saveAutoGcalPref();
@@ -2581,6 +2687,10 @@ function dlTag(t){
   if(d<=7) return`<span class="tag tg-dl-soon"><i class="fa-regular fa-clock"></i> Due in ${d}d</span>`;
   return`<span class="tag tg-dl-ok"><i class="fa-regular fa-calendar"></i> Due ${fmtD(t.deadline)}</span>`;
 }
+// A Work Day pill is done when its date is listed in t.workDayDone (an array
+// of ISO date strings) — a separate, per-day completion state that never
+// touches the task-level `done` flag/Done checkbox.
+function isWDDone(t,d){ return Array.isArray(t.workDayDone) && t.workDayDone.includes(d); }
 function wdPills(t){
   if(!t.workDays||!t.workDays.length)return'';
   const td=todayStr();
@@ -2591,8 +2701,9 @@ function wdPills(t){
   // itself stayed a fixed light orange, going invisible.
   const timeStr = (t.startTime&&t.endTime) ? `<span style="font-size:10px;color:var(--theme-on-btnlight,var(--theme-dark,#854F0B));font-weight:600;background:var(--theme-btn-light,#FFF3E0);border:1px solid var(--theme-border,#FFB877);border-radius:8px;padding:1px 7px;margin-left:4px;"><i class="fa-regular fa-clock"></i> ${t.startTime}–${t.endTime}</span>` : '';
   const pills=t.workDays.map(d=>{
-    const cls=d===td?'wd-pill wd-today':d<td?'wd-pill wd-past':'wd-pill';
-    return`<span class="${cls}">${fmtDS(d)}${d===td?' ✦':''}</span>`;
+    const wdDone=isWDDone(t,d);
+    const cls=(wdDone?'wd-pill wd-daydone':d===td?'wd-pill wd-today':d<td?'wd-pill wd-past':'wd-pill');
+    return`<label class="${cls}"><input type="checkbox" ${wdDone?'checked':''} onclick="event.stopPropagation();toggleWorkDayDone(${t.id},'${d}')" title="Mark this work day complete"><span class="wd-pill-label">${fmtDS(d)}${(d===td&&!wdDone)?' ✦':''}</span></label>`;
   }).join('');
   return`<div style="margin-top:3px;font-size:10px;color:var(--text-muted,#999);display:flex;align-items:flex-start;gap:4px;flex-wrap:wrap;"><span><i class="fa-regular fa-calendar-check"></i> Work days:</span><div class="workdays-wrap" style="flex:1;">${pills}${timeStr}</div></div>`;
 }
@@ -2637,7 +2748,7 @@ function buildCard(t){
           ${t.isMonthly?`<span class="tag tg-monthly"><i class="fa-solid fa-rotate"></i> Monthly</span>`:''}
           ${t.country?`<span class="tag tg-cntry"><i class="fa-solid fa-flag"></i> ${t.country}</span>`:''}
           ${t.project?`<span class="tag tg-proj"><i class="fa-solid fa-folder-open"></i> ${t.project}</span>`:''}
-          ${t.assignedTo?`<span class="tag tg-usr"><i class="fa-solid fa-user"></i> ${t.assignedTo}</span>`:''}
+          ${taskAssignees(t).map(m=>`<span class="tag tg-usr"><i class="fa-solid fa-user"></i> ${m}</span>`).join('')}
           ${dlTag(t)}
         </div>
         ${t.assignedFrom?`<div class="assign-line"><i class="fa-solid fa-arrow-right-to-bracket"></i> Assignor: <strong>${t.assignedFrom}</strong></div>`:''}
@@ -2675,7 +2786,7 @@ function renderNotifs(){
   // Respects the Assignee Quick Filter — with a specific person selected,
   // only their own due-today/due-tomorrow/overdue tasks are notified about;
   // "All" (the default) still notifies across everyone, same as before.
-  const notifPool = curAssigneeFilter ? tasks.filter(t=>t.assignedTo===curAssigneeFilter) : tasks;
+  const notifPool = curAssigneeFilter ? tasks.filter(t=>taskAssignees(t).includes(curAssigneeFilter)) : tasks;
   // Overdue keeps notifying every day until the task is marked done.
   const dOverdue=notifPool.filter(t=>!t.done&&t.deadline&&daysDiff(t.deadline)<0);
   const dToday=notifPool.filter(t=>!t.done&&t.deadline===td);
@@ -2688,7 +2799,7 @@ function renderNotifs(){
       <div class="notif-item-body">
         <div class="notif-item-title">🔴 Overdue</div>
         <div class="notif-item-name">${t.name}${t.project?' · '+t.project:''}</div>
-        <div class="notif-item-assignee">${t.assignedTo||''}</div>
+        <div class="notif-item-assignee">${taskAssignees(t).join(', ')}</div>
       </div>
     </div>`;
   });
@@ -2698,7 +2809,7 @@ function renderNotifs(){
       <div class="notif-item-body">
         <div class="notif-item-title">⚠️ Due Today</div>
         <div class="notif-item-name">${t.name}${t.project?' · '+t.project:''}</div>
-        <div class="notif-item-assignee">${t.assignedTo||''}</div>
+        <div class="notif-item-assignee">${taskAssignees(t).join(', ')}</div>
       </div>
     </div>`;
   });
@@ -2708,7 +2819,7 @@ function renderNotifs(){
       <div class="notif-item-body">
         <div class="notif-item-title">🔔 Due Tomorrow</div>
         <div class="notif-item-name">${t.name}${t.project?' · '+t.project:''}</div>
-        <div class="notif-item-assignee">${t.assignedTo||''}</div>
+        <div class="notif-item-assignee">${taskAssignees(t).join(', ')}</div>
       </div>
     </div>`;
   });
@@ -2745,7 +2856,11 @@ function renderLists(){
   const filtered=getFiltered();
   const td=todayStr();
   renderNotifs();
-  const todayT    = filtered.filter(t=>t.workDays&&t.workDays.includes(td));
+  // A task appears in Today only while it has an active (not yet checked-off)
+  // work day scheduled for today — checking today's Work Day pill removes it
+  // from Today without touching the task-level Done state, and it reappears
+  // on its own on the next scheduled work day.
+  const todayT    = filtered.filter(t=>t.workDays&&t.workDays.includes(td)&&!isWDDone(t,td));
   const todayUndone = todayT.filter(t=>!t.done);
   const hot       = filtered.filter(t=>t.deadline&&!t.done&&daysDiff(t.deadline)<=7);
   const remaining = filtered.filter(t=>!t.done);
@@ -3098,9 +3213,10 @@ function loadHeaderColor(){
 function taskToRow(t){
   return {
     ID:t.id, Name:t.name, Priority:getPriority(t.priority).label, Status:getStatus(t.status).label,
-    Data:t.project||'', Country:t.country||'', Assignor:t.assignedFrom||'', Assignee:t.assignedTo||'',
+    Data:t.project||'', Country:t.country||'', Assignor:t.assignedFrom||'', Assignee:taskAssignees(t).join(', '),
     Deadline:t.deadline||'', 'Start Time':t.startTime||'', 'Finish Time':t.endTime||'',
-    'Work Days':(t.workDays||[]).join(', '), Monthly:t.isMonthly?'Yes':'No',
+    'Work Days':(t.workDays||[]).join(', '),
+    'Work Days Completed':(t.workDayDone||[]).join(', '), Monthly:t.isMonthly?'Yes':'No',
     'To Do List':(t.todos||[]).map(td=>`[${td.done?'x':' '}] ${td.text}`).join('; '),
     Done:t.done?'Yes':'No',
     Detail:(t.detail||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim()
@@ -3123,6 +3239,13 @@ async function doExport(format){
 // All prior entries were removed; future releases increment from this point
 // (v2026.08.01, v2026.08.02, ...), newest first.
 const changelogModal = createChangelogModal([
+  {version:'v2026.09.00', date:'Sep 2026', items:[
+    'A task can now be assigned to multiple people — the Assignee field is a multi-select, and every assignee is shown on the task card',
+    'The Assignee quick filter matches any one of a task\'s assignees, so a task shared by two people appears under each of them',
+    'Each scheduled Work Day now has its own checkbox — tick a day to cross it off without completing the whole task',
+    'A task leaves the Today tab once that day\'s Work Day is ticked, stays in Remaining, and comes back on its next scheduled work day',
+    'The task-level Done checkbox is unchanged and is still the only thing that moves a task to the Done tab'
+  ]},
   {version:'v2026.08.31', date:'Aug 2026', items:[
     'Fixed Monthly tasks sometimes showing the "Monthly Complete" status pill while still appearing as undone (unchecked Done box, no strikethrough) — editing a task through the modal now marks it done for both "Completed" and "Monthly Complete", matching the status pill',
     'Monthly tasks marked "Monthly Complete" now automatically reopen as "Pending for this Month" (undone) as soon as the calendar rolls into a new month',
@@ -3168,7 +3291,7 @@ const SB_TABLE='task_manager_state';
 // in-app "a newer version exists" notice, using a second row (id=SB_META_ID)
 // in the same table as a tiny shared bulletin board — bump APP_HTML_VERSION
 // here to match the latest changelog entry each time you publish an update.
-const APP_HTML_VERSION='v2026.08.31';
+const APP_HTML_VERSION='v2026.09.00';
 const SB_META_ID='app_meta';
 // The shared link everyone should open this app from (Supabase Storage) —
 // baked in so Publish doesn't require re-pasting it every time.
@@ -3397,7 +3520,7 @@ function applyState(data){
   // A remote copy pushed before a data migration existed would otherwise
   // silently reintroduce the old data every time it's pulled back down —
   // push the corrected copy straight back up so it sticks for every device.
-  const migrated = migratePriorityAndStatusDefaults() | migrateMonthlyTaskField() | migrateHistoryField() | migrateDoneStatusConsistency() | purgeExpiredTrash() | resetMonthlyTasksForNewMonth();
+  const migrated = migratePriorityAndStatusDefaults() | migrateMonthlyTaskField() | migrateHistoryField() | migrateAssigneesField() | migrateDoneStatusConsistency() | purgeExpiredTrash() | resetMonthlyTasksForNewMonth();
   if(migrated) pushStateToSupabase();
   refreshSelects(); renderConfig(); render(); updateDraftBadge(); updateTrashBadge();
 }
