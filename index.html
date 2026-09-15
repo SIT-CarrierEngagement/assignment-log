@@ -567,7 +567,7 @@ body,.task-card,.modal-box,.config-section,.status-popup,.cl-modal,#dp-pop,.time
     <button class="sidebar-close-btn" onclick="toggleConfigSidebar()"><i class="fa-solid fa-xmark"></i></button>
   </div>
   <div class="sidebar-version-row">
-    <button class="version-pill" id="version-pill" onclick="changelogModal.open()"><i class="fa-solid fa-clock-rotate-left"></i> v2026.09.00 — What's New</button>
+    <button class="version-pill" id="version-pill" onclick="changelogModal.open()"><i class="fa-solid fa-clock-rotate-left"></i> v2026.09.01 — What's New</button>
   </div>
   <div class="config-sidebar-body">
 
@@ -1639,33 +1639,58 @@ function migrateDoneStatusConsistency(){
   return changed;
 }
 migrateDoneStatusConsistency();
-// Monthly tasks marked "Monthly Complete" don't carry over as done into the
-// next month — once the calendar month rolls over, every such task is
-// reopened as "Pending for this Month" so it shows up again as work to do.
-// Guarded by a stored 'YYYY-MM' so this only fires once per month rollover
-// (and never on the very first run, which just records the current month
-// instead of wiping out completions made earlier that same month).
+// Which calendar month a task's current "Monthly Complete" belongs to.
+// Completions made from now on stamp monthlyCompletedMonth directly; ones
+// made before that field existed fall back to the month of the last
+// "Monthly Complete" entry in the task's own history. No stamp and no such
+// history entry means the completion's month is unknown, which is treated as
+// stale so it can't linger forever.
+function monthlyCompletionMonth(t){
+  if(t.monthlyCompletedMonth) return t.monthlyCompletedMonth;
+  const log=Array.isArray(t.history)?t.history:[];
+  const label=fmtHistoryVal('status','monthly-complete');
+  for(let i=log.length-1;i>=0;i--){
+    const e=log[i];
+    if(e.action!=='status') continue;
+    // Match the current label and the built-in one, so a status renamed in
+    // Config doesn't make older history entries unreadable.
+    if(!(e.changes||[]).some(c=>c.to===label||c.to==='Monthly Complete')) continue;
+    const ts=Date.parse(e.at);
+    if(!isNaN(ts)) return new Date(ts).toISOString().slice(0,7);
+  }
+  return null;
+}
+// "Monthly Complete" only applies to the month it was completed in: any
+// monthly task still carrying a completion from an earlier month is reopened
+// as "Pending for this Month". Decided per task (by comparing that task's own
+// completion month against today's) rather than via a once-per-device flag —
+// a device-wide flag got consumed by the boot run and then skipped the run in
+// applyState(), so tasks arriving later from the database never got reset.
+// Being per-task also makes this idempotent, so it's safe to call from boot,
+// from applyState(), and from the hourly timer alike.
 function resetMonthlyTasksForNewMonth(){
   const curMonth=new Date().toISOString().slice(0,7);
-  const lastMonth=localStorage.getItem('tm_monthly_reset_month');
-  if(lastMonth===null){
-    localStorage.setItem('tm_monthly_reset_month',curMonth);
-    return false;
-  }
-  if(lastMonth===curMonth) return false;
   let changed=false;
   tasks.forEach(t=>{
-    if(t.isMonthly && t.status==='monthly-complete'){
+    if(t.isMonthly && t.status==='monthly-complete' && monthlyCompletionMonth(t)!==curMonth){
       const prevStatus=t.status;
       t.status='pending-month';
       t.done=false;
+      // Only the live status is reset — every past history entry is left
+      // untouched, so the earlier month's completion stays on the record.
+      delete t.monthlyCompletedMonth;
       addHistory(t,'status',[{field:'Status',from:fmtHistoryVal('status',prevStatus),to:fmtHistoryVal('status','pending-month')}]);
       changed=true;
     }
   });
-  localStorage.setItem('tm_monthly_reset_month',curMonth);
   if(changed) localStorage.setItem('tm_tasks_v6', JSON.stringify(tasks));
   return changed;
+}
+// Records which month a completion belongs to whenever a task's status is set.
+// Called from every path that can set 'monthly-complete'.
+function stampMonthlyCompletion(t){
+  if(t.status==='monthly-complete') t.monthlyCompletedMonth=new Date().toISOString().slice(0,7);
+  else delete t.monthlyCompletedMonth;
 }
 resetMonthlyTasksForNewMonth();
 let selP='2', editId=null, editingDraftId=null, wdBuf=[], todoBuf=[], quill=null, statusTargetId=null, modalInitialSnapshot=null;
@@ -2238,6 +2263,7 @@ function applyStatus(key){
   if(t){
     const prevStatus=t.status;
     t.status=key;t.done=(key==='completed'||key==='monthly-complete');
+    stampMonthlyCompletion(t);
     if(prevStatus!==key) addHistory(t,'status',[{field:'Status',from:fmtHistoryVal('status',prevStatus),to:fmtHistoryVal('status',key)}]);
     save();
   }
@@ -2282,6 +2308,7 @@ function toggleComplete(id){
     ? (t.done?'monthly-complete':'pending-month')
     : (t.done?'completed':'inprogress');
   t.status=newStatus;
+  stampMonthlyCompletion(t);
   if(prevStatus!==newStatus) addHistory(t,'status',[{field:'Status',from:fmtHistoryVal('status',prevStatus),to:fmtHistoryVal('status',newStatus)}]);
   save();render();
 }
@@ -2586,6 +2613,7 @@ function saveTask(){
     // updates the original card in place instead of spawning a new one.
     const before={...tasks[idx]};
     tasks[idx]={...tasks[idx],...payload};
+    stampMonthlyCompletion(tasks[idx]);
     logTaskEdit(before, tasks[idx]);
     saved=tasks[idx];
   } else {
@@ -2593,6 +2621,7 @@ function saveTask(){
     // while this edit-draft sat unsaved — fall back to creating a new task
     // instead of crashing on a missing index.
     saved={id:nextId++,...payload,history:[]};
+    stampMonthlyCompletion(saved);
     addHistory(saved,'created',[]);
     tasks.push(saved);
   }
@@ -3239,6 +3268,10 @@ async function doExport(format){
 // All prior entries were removed; future releases increment from this point
 // (v2026.08.01, v2026.08.02, ...), newest first.
 const changelogModal = createChangelogModal([
+  {version:'v2026.09.01', date:'Sep 2026', items:[
+    'Fixed Monthly tasks completed in a previous month still showing "Monthly Complete" — a completion now applies only to the month it was made in, and the task reopens as "Pending for this Month" once the calendar month changes',
+    'Previous months\' completions stay in the task History exactly as before — only the current status is reset'
+  ]},
   {version:'v2026.09.00', date:'Sep 2026', items:[
     'A task can now be assigned to multiple people — the Assignee field is a multi-select, and every assignee is shown on the task card',
     'The Assignee quick filter matches any one of a task\'s assignees, so a task shared by two people appears under each of them',
@@ -3291,7 +3324,7 @@ const SB_TABLE='task_manager_state';
 // in-app "a newer version exists" notice, using a second row (id=SB_META_ID)
 // in the same table as a tiny shared bulletin board — bump APP_HTML_VERSION
 // here to match the latest changelog entry each time you publish an update.
-const APP_HTML_VERSION='v2026.09.00';
+const APP_HTML_VERSION='v2026.09.01';
 const SB_META_ID='app_meta';
 // The shared link everyone should open this app from (Supabase Storage) —
 // baked in so Publish doesn't require re-pasting it every time.
