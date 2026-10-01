@@ -236,10 +236,28 @@ html,body{height:100%;font-family:'Inter',sans-serif;background:var(--theme-bg,#
 .pp4{background:#DCEEFB;color:#0C4A6E;border-color:#93C5FD;--pill-outline:#0C4A6E;}
 .date-multi-box{border:1.5px solid var(--border2,#E5E5E5);border-radius:8px;padding:7px 9px;background:var(--surface,#FAFAFA);}
 .dmadd-row{display:flex;gap:5px;}
+.wd-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:start;}
+.wd-column{min-width:0;display:flex;flex-direction:column;gap:5px;}
+.wd-column-label{font-size:10px;font-weight:700;color:var(--text-muted,#888);text-transform:uppercase;letter-spacing:.04em;}
+.wd-month-pills{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;}
+.wd-month-pills button{padding:7px 2px;border:1px solid transparent;border-radius:18px;background:transparent;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;}
+.wd-month-pills button:hover{background:var(--surface2);}
+.wd-month-pills button.selected{background:var(--accent);color:var(--accent-text,#fff);border-color:var(--accent);}
+.wd-month-trigger{position:relative;flex:1;min-width:0;}
+.wd-month-trigger .dp-trigger{cursor:pointer;text-align:left;}
+.wd-month-pop{position:fixed;z-index:9999;width:268px;max-width:calc(100vw - 16px);padding:12px;background:var(--surface-card,#fff);border:1.5px solid var(--border);border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.22);display:none;}
+.wd-month-pop.open{display:block;}
+.wd-month-pop .dp-selects select{width:100%;}
+.wd-month-pop .dp-actions button{flex:1;padding:7px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;}
+.wd-month-pop .wd-month-clear{background:var(--surface-card,#fff);border:1.5px solid var(--border);color:var(--text-muted);}
+.wd-month-pop .wd-month-done{background:var(--accent);border:1.5px solid var(--accent);color:var(--accent-text,#fff);}
+@media(max-width:600px){.wd-grid{grid-template-columns:1fr;}}
 .dmadd-row>input{flex:1;padding:6px 9px;border:1px solid var(--border-input,#DDD);border-radius:7px;font-size:12px;font-family:'Inter',sans-serif;background:var(--surface-card,#fff);}
 .dmadd-row .dp-wrap{flex:1;}
 .dmadd-row button{padding:6px 12px;border:none;border-radius:7px;background:var(--theme-dark,#E07020);color:var(--theme-on-accent,#fff);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
 .dmadd-row button:hover{filter:brightness(.88);}
+.dmadd-row .wd-month-trigger .dp-trigger{width:100%;padding:8px 10px 8px 30px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;font-weight:400;overflow:hidden;text-overflow:ellipsis;}
+.dmadd-row .wd-month-trigger .dp-trigger.open{border-color:var(--accent);box-shadow:0 0 0 2px rgba(224,112,32,.15);}
 .sel-dates{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
 .sdpill{background:var(--theme-btn-light,#FFF3E0);color:var(--theme-on-btnlight,var(--theme-dark,#C05A10));border:1px solid var(--theme-border,#FFB877);border-radius:10px;padding:2px 7px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px;}
 .sdpill button{background:none;border:none;cursor:pointer;color:var(--theme-on-btnlight,var(--theme-dark,#C05A10));font-size:12px;line-height:1;padding:0;}
@@ -924,11 +942,31 @@ body,.task-card,.modal-box,.config-section,.status-popup,.cl-modal,#dp-pop,.time
     <div class="form-group">
       <label class="form-label">Scheduled Work Days (multi-select)</label>
       <div class="date-multi-box">
-        <div class="dmadd-row">
-          <div id="f-wd-input-wrap" style="flex:1;"></div>
-          <button onclick="addWD()">+ Add Day</button>
+        <div class="wd-grid">
+          <div class="wd-column">
+            <div class="wd-column-label">Select a specific date</div>
+            <div class="dmadd-row">
+              <div id="f-wd-input-wrap" style="flex:1;"></div>
+              <button onclick="addWD()">+ Add Day</button>
+            </div>
+          </div>
+          <div class="wd-column">
+            <div class="wd-column-label">Select month(s)</div>
+            <div class="dmadd-row">
+              <div class="wd-month-trigger dp-wrap">
+                <i class="fa-regular fa-calendar dp-ico" aria-hidden="true"></i>
+                <button type="button" id="f-wd-month-trigger" class="dp-trigger" aria-haspopup="dialog" aria-expanded="false" onclick="toggleWDMonthPicker(event)">Select month(s)</button>
+              </div>
+              <button onclick="addWD(true)">+ Add Month</button>
+            </div>
+          </div>
         </div>
         <div class="sel-dates" id="sel-dates"></div>
+      </div>
+      <div id="f-wd-month-pop" class="wd-month-pop" role="dialog" aria-label="Select Work Day months">
+        <div class="dp-selects"><select id="f-wd-year" aria-label="Work Day year"></select></div>
+        <div id="f-wd-month-pills" class="wd-month-pills"></div>
+        <div class="dp-actions"><button type="button" class="wd-month-clear" onclick="clearWDMonths()">Clear</button><button type="button" class="wd-month-done" onclick="closeWDMonthPicker()">Done</button></div>
       </div>
     </div>
     <div class="form-group">
@@ -1710,6 +1748,9 @@ const tmrwStr  = ()=>{const d=new Date();d.setDate(d.getDate()+1);return d.toISO
 const daysDiff = d=>Math.ceil((new Date(d+'T00:00:00')-new Date(todayStr()+'T00:00:00'))/86400000);
 const fmtD  = d=>{if(!d)return'-';return new Date(d+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'2-digit'});}
 const fmtDS = d=>{if(!d)return'';return new Date(d+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'});}
+const isWorkMonth = d=>/^\d{4}-\d{2}$/.test(d);
+const fmtWD = d=>isWorkMonth(d)?new Date(d+'-01T00:00:00').toLocaleDateString('en-US',{month:'short'}):fmtDS(d);
+const isWorkDayToday = (t,td)=>Array.isArray(t.workDays)&&t.workDays.some(d=>isWorkMonth(d)?d===td.slice(0,7):d===td);
 
 function getPriority(key){return priorities.find(p=>p.key===String(key))||{key:String(key),label:'Priority '+key,bg:'#EEE',txt:'#555',bdr:'#CCC',stripe:'#AAA'};}
 // Keep these as live getters so card rendering always uses current priorities data
@@ -2292,7 +2333,7 @@ function toggleWorkDayDone(taskId,d){
   if(!Array.isArray(t.workDayDone)) t.workDayDone=[];
   const wasDone=t.workDayDone.includes(d);
   t.workDayDone = wasDone ? t.workDayDone.filter(x=>x!==d) : [...t.workDayDone, d];
-  addHistory(t,'workday',[{field:'Work Day', from:'', to:`${wasDone?'Reopened':'Completed'}: ${fmtDS(d)}`}]);
+  addHistory(t,'workday',[{field:'Work Day', from:'', to:`${wasDone?'Reopened':'Completed'}: ${fmtWD(d)}`}]);
   save();render();
 }
 
@@ -2383,17 +2424,50 @@ function updateTrashBadge(){
 }
 
 // ══════════ WORK DAYS ══════════
-function addWD(){
-  const v=document.getElementById('f-wd-input').dataset.iso;
-  if(!v)return;
-  if(!wdBuf.includes(v)){wdBuf.push(v);wdBuf.sort();}
+const wdMonthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+let wdMonthSelection=[];
+function initWDMonthPicker(){
+  const year=document.getElementById('f-wd-year'),wrap=document.getElementById('f-wd-month-pills');
+  if(!year||!wrap)return;
+  const current=new Date().getFullYear();
+  if(!year.options.length)year.innerHTML=Array.from({length:16},(_,i)=>current-5+i).map(y=>`<option value="${y}" ${y===current?'selected':''}>${y}</option>`).join('');
+  wrap.innerHTML=wdMonthNames.map((m,i)=>`<button type="button" class="${wdMonthSelection.includes(i+1)?'selected':''}" aria-pressed="${wdMonthSelection.includes(i+1)}" onclick="toggleWDMonth(${i+1})">${m}</button>`).join('');
+  const trigger=document.getElementById('f-wd-month-trigger');
+  trigger.textContent=wdMonthSelection.length?`${wdMonthSelection.sort((a,b)=>a-b).map(m=>wdMonthNames[m-1]).join(', ')} ${year.value}`:'Select month(s)';
+}
+function closeWDMonthPicker(){
+  document.getElementById('f-wd-month-pop').classList.remove('open');
+  const trigger=document.getElementById('f-wd-month-trigger');
+  trigger.classList.remove('open');trigger.setAttribute('aria-expanded','false');
+}
+function toggleWDMonthPicker(event){
+  event.stopPropagation();
+  const pop=document.getElementById('f-wd-month-pop'),trigger=document.getElementById('f-wd-month-trigger');
+  if(pop.classList.contains('open')){closeWDMonthPicker();return;}
+  const rect=trigger.getBoundingClientRect();
+  pop.style.left=`${Math.max(8,Math.min(rect.left,window.innerWidth-276))}px`;
+  pop.style.top=`${rect.bottom+8+210>window.innerHeight?Math.max(8,rect.top-210):rect.bottom+8}px`;
+  pop.classList.add('open');trigger.classList.add('open');trigger.setAttribute('aria-expanded','true');
+}
+function clearWDMonths(){wdMonthSelection=[];initWDMonthPicker();}
+document.addEventListener('click',e=>{const pop=document.getElementById('f-wd-month-pop');if(pop?.classList.contains('open')&&!pop.contains(e.target))closeWDMonthPicker();});
+function toggleWDMonth(month){
+  wdMonthSelection=wdMonthSelection.includes(month)?wdMonthSelection.filter(m=>m!==month):[...wdMonthSelection,month];
+  initWDMonthPicker();
+}
+function addWD(month=false){
+  const values=month?wdMonthSelection.map(m=>`${document.getElementById('f-wd-year').value}-${String(m).padStart(2,'0')}`):[document.getElementById('f-wd-input').dataset.iso];
+  const valid=values.filter(Boolean);
+  if(!valid.length)return;
+  wdBuf=[...new Set([...wdBuf,...valid])].sort();
+  if(month){wdMonthSelection=[];initWDMonthPicker();closeWDMonthPicker();}
   dpSetValue('f-wd-input','');
   renderWDPreview();
 }
 function removeWD(d){wdBuf=wdBuf.filter(x=>x!==d);renderWDPreview();}
 function renderWDPreview(){
   document.getElementById('sel-dates').innerHTML=wdBuf.map(d=>
-    `<span class="sdpill">${fmtDS(d)}<button onclick="removeWD('${d}')">×</button></span>`).join('');
+    `<span class="sdpill">${fmtWD(d)}<button onclick="removeWD('${d}')">×</button></span>`).join('');
 }
 
 // ══════════ TO DO LIST ══════════
@@ -2430,6 +2504,8 @@ function initPickers(){
   if(pickersInit)return;pickersInit=true;
   document.getElementById('f-deadline-wrap').appendChild(createDateTrigger('f-deadline',''));
   document.getElementById('f-wd-input-wrap').appendChild(createDateTrigger('f-wd-input',''));
+  initWDMonthPicker();
+  document.getElementById('f-wd-year').addEventListener('change',initWDMonthPicker);
   createTimePicker('f-start-time');
   createTimePicker('f-end-time');
   document.getElementById('f-deadline').addEventListener('change',()=>{
@@ -2487,6 +2563,10 @@ function populateModalFields(t){
   syncPickerToValue('f-start-time',t?t.startTime||'':'');
   syncPickerToValue('f-end-time',t?t.endTime||'':'');
   wdBuf=t?[...(t.workDays||[])]:[];
+  wdMonthSelection=[];
+  initWDMonthPicker();
+  closeWDMonthPicker();
+
   todoBuf=t?(t.todos||[]).map(td=>({...td})):[];
   // Go through Quill's own API rather than poking root.innerHTML directly —
   // Quill normalizes the DOM (e.g. empty content becomes "<p><br></p>") the
@@ -2731,8 +2811,10 @@ function wdPills(t){
   const timeStr = (t.startTime&&t.endTime) ? `<span style="font-size:10px;color:var(--theme-on-btnlight,var(--theme-dark,#854F0B));font-weight:600;background:var(--theme-btn-light,#FFF3E0);border:1px solid var(--theme-border,#FFB877);border-radius:8px;padding:1px 7px;margin-left:4px;"><i class="fa-regular fa-clock"></i> ${t.startTime}–${t.endTime}</span>` : '';
   const pills=t.workDays.map(d=>{
     const wdDone=isWDDone(t,d);
-    const cls=(wdDone?'wd-pill wd-daydone':d===td?'wd-pill wd-today':d<td?'wd-pill wd-past':'wd-pill');
-    return`<label class="${cls}"><input type="checkbox" ${wdDone?'checked':''} onclick="event.stopPropagation();toggleWorkDayDone(${t.id},'${d}')" title="Mark this work day complete"><span class="wd-pill-label">${fmtDS(d)}${(d===td&&!wdDone)?' ✦':''}</span></label>`;
+    const active=isWorkMonth(d)?d===td.slice(0,7):d===td;
+    const past=isWorkMonth(d)?d<td.slice(0,7):d<td;
+    const cls=(wdDone?'wd-pill wd-daydone':active?'wd-pill wd-today':past?'wd-pill wd-past':'wd-pill');
+    return`<label class="${cls}"><input type="checkbox" ${wdDone?'checked':''} onclick="event.stopPropagation();toggleWorkDayDone(${t.id},'${d}')" title="Mark this work day complete"><span class="wd-pill-label">${fmtWD(d)}${(active&&!wdDone)?' ✦':''}</span></label>`;
   }).join('');
   return`<div style="margin-top:3px;font-size:10px;color:var(--text-muted,#999);display:flex;align-items:flex-start;gap:4px;flex-wrap:wrap;"><span><i class="fa-regular fa-calendar-check"></i> Work days:</span><div class="workdays-wrap" style="flex:1;">${pills}${timeStr}</div></div>`;
 }
@@ -2889,7 +2971,7 @@ function renderLists(){
   // work day scheduled for today — checking today's Work Day pill removes it
   // from Today without touching the task-level Done state, and it reappears
   // on its own on the next scheduled work day.
-  const todayT    = filtered.filter(t=>t.workDays&&t.workDays.includes(td)&&!isWDDone(t,td));
+  const todayT    = filtered.filter(t=>isWorkDayToday(t,td)&&!(t.workDays||[]).filter(d=>isWorkMonth(d)?d===td.slice(0,7):d===td).every(d=>isWDDone(t,d)));
   const todayUndone = todayT.filter(t=>!t.done);
   const hot       = filtered.filter(t=>t.deadline&&!t.done&&daysDiff(t.deadline)<=7);
   const remaining = filtered.filter(t=>!t.done);
