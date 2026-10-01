@@ -2464,6 +2464,12 @@ function addWD(month=false){
   dpSetValue('f-wd-input','');
   renderWDPreview();
 }
+function selectedWorkDaysForSave(){
+  const date=document.getElementById('f-wd-input')?.dataset.iso;
+  const year=document.getElementById('f-wd-year')?.value;
+  const pendingMonths=year?wdMonthSelection.map(m=>`${year}-${String(m).padStart(2,'0')}`):[];
+  return [...new Set([...wdBuf,...(date?[date]:[]),...pendingMonths])].sort();
+}
 function removeWD(d){wdBuf=wdBuf.filter(x=>x!==d);renderWDPreview();}
 function renderWDPreview(){
   document.getElementById('sel-dates').innerHTML=wdBuf.map(d=>
@@ -2654,7 +2660,7 @@ function readModalPayload(nameFallback){
     deadline:document.getElementById('f-deadline').dataset.iso||'',
     startTime:document.getElementById('f-start-time').value||'',
     endTime:document.getElementById('f-end-time').value||'',
-    workDays:[...wdBuf],
+    workDays:selectedWorkDaysForSave(),
     todos:todoBuf.map(td=>({...td})),
     detail:quill?quill.root.innerHTML:'',
     // Monthly tasks are marked done via 'monthly-complete', not 'completed' —
